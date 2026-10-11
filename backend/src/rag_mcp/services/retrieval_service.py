@@ -29,6 +29,7 @@ from rag_mcp.models.knowledge_scope import KnowledgeScope
 from rag_mcp.models.knowledge_version import KnowledgeVersion
 from rag_mcp.models.project import Project
 from rag_mcp.models.retrieval_run import RetrievalRun
+from rag_mcp.providers.active_model import active_embedding_model, derive_index_version
 from rag_mcp.providers.base import EmbeddingProvider, RerankerProvider
 from rag_mcp.utils.snowflake import generate_id
 
@@ -1857,7 +1858,5 @@ class RetrievalService:
         )
 
     def _derive_index_version(self) -> str:
-        """Derive the Qdrant collection index_version from settings."""
-        embedding_model = self._settings.embedding_model
-        short_name = embedding_model.rsplit("/", 1)[-1]
-        return f"{short_name}_v1"
+        """Derive the Qdrant collection index_version from the active provider model."""
+        return derive_index_version(active_embedding_model(self._settings))
