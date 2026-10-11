@@ -201,6 +201,37 @@ alembic upgrade head          # 共 47 个迁移，单一 head = 0106_memory_con
 > - 从 2.x 升级：直接 `alembic upgrade head` 即可，历史数据与历史向量集合零删除（Qdrant 侧换 embedding 版本时另建新集合，旧集合保留到重建完成）
 > - 可选：`cp .env.example .env` 按需修改连接信息；默认值与 docker-compose 一致，本机部署无需修改
 
+### 可选：切换到在线嵌入 / 重排序模型
+
+不想在本机跑 embedding / reranker 时，把这两类能力指向 OpenAI 兼容的云 API（百炼 / 硅基流动 / OpenAI 等）。**只改 `.env`，不改代码**：
+
+```ini
+EMBEDDING_PROVIDER_TYPE=remote_api
+EMBEDDING_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBEDDING_MODEL=BAAI/bge-m3          # 必须与现网逐字符一致，否则集合名改变
+EMBEDDING_API_KEY_ENV=EMBEDDING_API_KEY
+EMBEDDING_API_KEY=<你的密钥>          # 密钥值放这里；PROVIDER 只读上面的变量「名」
+EMBEDDING_TIMEOUT_S=30                # 云端建议 30s（Provider 构造默认值为 2s）
+# EMBEDDING_DIMENSION=1024            # 可选；不填则读既有集合维度，集合不存在时首次调用后确定
+
+RERANKER_PROVIDER_TYPE=remote_api
+RERANKER_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANKER_API_KEY_ENV=RERANKER_API_KEY
+RERANKER_API_KEY=<你的密钥>
+RERANKER_TIMEOUT_S=30
+```
+
+改完重启两个进程（writer 管理面 + MCP）。三条要点：
+
+- **集合名由 `EMBEDDING_MODEL` 决定，不由 Provider 类型决定**：`chunks_hybrid_<短名>_v1`（如 `BAAI/bge-m3` → `chunks_hybrid_bge-m3_v1`），记忆投影为 `memories_dense_<归一化模型名>_012_v2`。只切换 Provider 类型、模型标识逐字符不变时，集合名不变，既有向量继续可用。
+- **更换模型是运维的职责**：新模型生成新集合并与旧集合物理隔离（旧向量不参与新检索、也不污染新集合）；系统**不提供迁移工具、不清空任何旧集合**，是否重嵌入与何时清理由你决定。
+- 凭据只以环境变量「名」进入配置（`*_API_KEY_ENV`），密钥值不进入任何配置结构。
+
+**回滚**：把 `EMBEDDING_PROVIDER_TYPE` / `RERANKER_PROVIDER_TYPE` 改回 `local_cpu` 并重启即可。本地模型缓存已就绪（`.models/huggingface/hub/models--BAAI--bge-m3` 与 `models--BAAI--bge-reranker-v2-m3`，`.env` 的 `HF_HOME` 已指向该目录），改回后无需重新下载。
+
+更多变量注释见 [.env.example](.env.example)（`*_ENDPOINT` / `*_API_KEY_ENV` / `*_TIMEOUT_S` / `*_DIMENSION`）。
+
 ### 第五步：前端（可选）
 
 ```bash

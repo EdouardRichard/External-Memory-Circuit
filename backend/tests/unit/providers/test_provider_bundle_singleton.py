@@ -61,7 +61,14 @@ def test_reset_is_idempotent() -> None:
 
 
 def test_limiter_is_usable_from_two_event_loops() -> None:
-    """一个 limiter 跨两个事件循环使用：不得挂起、不得抛错（Task 4 暴露的真实风险）."""
+    """冒烟：同一个 limiter 对象可先后用于两个事件循环（不挂起、不抛错）.
+
+    注意本用例**不能**证明循环绑定修复：limit=2 且只有两层嵌套获取，
+    两次都命中信号量 fast path，``_loop`` 始终为 ``None``，因此修复前的实现
+    同样通过（已实测复核）。真正的循环安全守卫是同一文件中的
+    ``test_limiter_contention_across_two_event_loops``（它先让竞争者在 slow path
+    上排队，把 ``_loop`` 绑定到首个循环）。
+    """
     import asyncio
 
     from rag_mcp.providers.concurrency import ConcurrencyLimiter
@@ -74,7 +81,7 @@ def test_limiter_is_usable_from_two_event_loops() -> None:
                 return "ok"
 
     assert asyncio.run(use_all()) == "ok"
-    assert asyncio.run(use_all()) == "ok"      # 第二个循环 — 修复前会挂起或抛 RuntimeError
+    assert asyncio.run(use_all()) == "ok"      # 第二个循环：仅冒烟，非修复证明
 
 
 def test_limiter_contention_across_two_event_loops() -> None:
