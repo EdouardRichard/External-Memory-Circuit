@@ -21,18 +21,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_embedding_provider = None
 _qdrant_store = None
-
-
-def _get_embedding_provider():
-    """Lazily create and cache the LocalCPUEmbeddingProvider singleton."""
-    global _embedding_provider
-    if _embedding_provider is None:
-        from rag_mcp.providers.local_cpu import LocalCPUEmbeddingProvider
-
-        _embedding_provider = LocalCPUEmbeddingProvider()
-    return _embedding_provider
 
 
 def _get_qdrant_store():
@@ -99,6 +88,7 @@ async def _run_ingestion(
     a crash-recovered promotion task resolves its own pending initial attempt.
     """
     from rag_mcp.db import get_session_factory
+    from rag_mcp.providers.factory import get_provider_bundle
     from rag_mcp.services.ingestion_service import IngestionService
 
     factory = get_session_factory()
@@ -106,7 +96,7 @@ async def _run_ingestion(
         async with factory() as session:
             service = IngestionService(
                 session=session,
-                embedding_provider=_get_embedding_provider(),
+                embedding_provider=get_provider_bundle().embedding,
                 qdrant_store=_get_qdrant_store(),
             )
             if retry:

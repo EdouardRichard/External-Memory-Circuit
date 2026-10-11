@@ -66,10 +66,8 @@ async def test_invalid_configs_fail_explicitly_no_silent_fallback():
     unknown = _cfg(provider_type="quantum")
     # 2. remote without endpoint
     remote_no_ep = _cfg(capability="embedding", provider_type="remote_api", endpoint=None)
-    # 3. dimension mismatch
-    dim_mismatch = _cfg(model="BAAI/bge-small-zh-v1.5")  # different dim than collection
 
-    for bad in (unknown, remote_no_ep, dim_mismatch):
+    for bad in (unknown, remote_no_ep):
         providers = ProviderSettings(
             embedding=bad,
             reranker=defaults.reranker,
@@ -77,6 +75,20 @@ async def test_invalid_configs_fail_explicitly_no_silent_fallback():
         )
         result = validate_provider_config(providers, llm_base_url="")
         assert result.valid is False, f"{bad.provider_type} should be invalid"
+
+
+def test_dimension_mismatch_fails_explicitly() -> None:
+    """SC-005：声明的维度与活跃集合维度不一致 → 显式失败（不再依赖 LLM endpoint 缺失误通过）."""
+    from rag_mcp.providers.factory import validate_provider_config
+
+    result = validate_provider_config(
+        get_settings().providers,
+        embedding_dimension=768,
+        active_collection_dimension=1024,
+        llm_base_url="http://llm.local/v1",
+    )
+    assert result.valid is False
+    assert any("dimension" in e.message.lower() for e in result.errors)
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,8 @@ from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
 
+from rag_mcp.providers.active_model import active_embedding_model
+
 REGISTRY_LIMIT_BYTES = 256 * 1024
 REPORT_LIMIT_BYTES = 8 * 1024 * 1024
 IO_BUDGET_MS = 100
@@ -400,7 +402,7 @@ def prompt_hash(profile) -> str:
 
 
 def recall_config_hash(settings, weights=None) -> str:
-    material = {'embedding_model': settings.embedding_model, 'weights': dict(weights or RECALL_WEIGHTS),
+    material = {'embedding_model': active_embedding_model(settings), 'weights': dict(weights or RECALL_WEIGHTS),
                 'limit_max': 50, 'timeout_ms': 3000, 'content_budget_chars': 6000,
                 'dense_candidate_min': 40, 'dense_candidate_factor': 4}
     return sha256(canonical_json(material)).hexdigest()

@@ -25,7 +25,6 @@ from rag_mcp.services.scope_resolver import MemoryScopeResolver
 from rag_mcp.services.memory_policy import MemoryPolicy
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
-_embedding_provider = None
 
 
 def management_action(action, *, actor):
@@ -44,11 +43,9 @@ async def require_writer(request: Request, session: AsyncSession = Depends(get_s
 
 
 def _service(session):
-    global _embedding_provider
-    if _embedding_provider is None:
-        from rag_mcp.providers.factory import assemble_or_fail
-        _embedding_provider = assemble_or_fail(get_settings()).embedding
-    return MemoryService(session, embedding_provider=_embedding_provider)
+    from rag_mcp.providers.factory import get_provider_bundle
+
+    return MemoryService(session, embedding_provider=get_provider_bundle().embedding)
 
 
 def _http_error(exception):

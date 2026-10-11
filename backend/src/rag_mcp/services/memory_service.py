@@ -20,7 +20,6 @@ from rag_mcp.models.memory_projection import MemoryEntry
 from rag_mcp.models.memory_projection_meta import MemoryProjectionMeta
 from rag_mcp.models.processing_run import ProcessingRun
 from rag_mcp.models.session import MemorySession
-from rag_mcp.providers.local_cpu import LocalCPUEmbeddingProvider
 from rag_mcp.services.memory_event_store import MemoryEventStore
 from rag_mcp.services.memory_projection_store import MemoryProjectionStore, ProjectionFailure
 from rag_mcp.services.memory_reducer import reduce_events
@@ -355,9 +354,11 @@ def _hard_replacement_command(event, target, validation):
 
 class MemoryService:
     def __init__(self, session, projection_store=None, *, embedding_provider=None, qdrant_store=None, projection_root=None):
+        from rag_mcp.providers.factory import get_provider_bundle
+
         self.session = session
         self.projections = projection_store or MemoryProjectionStore(session,
-            embedding_provider=embedding_provider or LocalCPUEmbeddingProvider(),
+            embedding_provider=embedding_provider or get_provider_bundle().embedding,
             qdrant_store=qdrant_store, projection_root=projection_root)
 
     def _ensure_vector_store(self):

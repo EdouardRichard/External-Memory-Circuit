@@ -71,10 +71,9 @@ def _async_url(database: str) -> str:
 
 
 def _memory_collection() -> str:
-    from rag_mcp.config import get_settings
+    from rag_mcp.providers.active_model import active_embedding_model, derive_memory_collection
 
-    model = get_settings().embedding_model.replace("/", "_").replace("-", "_")
-    return f"memories_dense_{model}_012_v2"
+    return derive_memory_collection(active_embedding_model())
 
 
 def _scope_of(database: str) -> int:

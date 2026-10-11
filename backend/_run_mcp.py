@@ -25,8 +25,6 @@ from rag_mcp.config import get_settings
 from rag_mcp.config.timeout_profiles import validate_timeout_profiles
 from rag_mcp.indexing.qdrant_client import QdrantStore
 from rag_mcp.mcp import create_mcp_server
-from rag_mcp.providers.local_cpu import LocalCPUEmbeddingProvider
-from rag_mcp.providers.local_cpu_reranker import LocalCPUReranker
 
 _INSTANCE_MODES = ("writer", "reader")
 
@@ -268,9 +266,11 @@ def build_mcp_server(
     (FR-001): the MCP plane is read-only; instance_mode only affects
     registration and metrics attribution.
     """
-    provider = embedding_provider if embedding_provider is not None else LocalCPUEmbeddingProvider()
+    from rag_mcp.providers.factory import get_provider_bundle
+
+    provider = embedding_provider if embedding_provider is not None else get_provider_bundle().embedding
     if reranker is None:
-        reranker = LocalCPUReranker()
+        reranker = get_provider_bundle().reranker
     qdrant = qdrant_store if qdrant_store is not None else QdrantStore()
 
     # FR-016/FR-020 (data-model §4.1): install this process's instance
