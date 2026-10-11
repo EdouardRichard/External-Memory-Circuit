@@ -28,19 +28,47 @@ def _cfg(**overrides) -> ProviderConfig:
 
 
 def test_default_bundle_assembles_three_providers():
-    """Three capabilities assembled independently from run config."""
-    from rag_mcp.providers.factory import build_provider_bundle
+    """Three capabilities assembled independently from run config.
 
-    bundle = build_provider_bundle(get_settings())
+    断言的是「装配结果与运行配置一致」，而不是某个固定的 Provider 类型：
+    本用例原先硬编码了 ``isinstance(bundle.embedding, LocalCPUEmbeddingProvider)``，
+    只在 ``EMBEDDING_PROVIDER_TYPE`` 保持默认 ``local_cpu`` 时成立。一旦运维按
+    在线适配的设计把 embedding 指向 remote_api（这正是该能力的目的），
+    该断言就会失败——它测的是环境，不是代码。改为按配置逐能力比对类型。
+    """
+    from rag_mcp.agents.llm_client import LLMClient
+    from rag_mcp.providers.factory import build_provider_bundle
+    from rag_mcp.providers.local_cpu import LocalCPUEmbeddingProvider
+    from rag_mcp.providers.local_cpu_reranker import LocalCPUReranker
+    from rag_mcp.providers.remote_api_embedding import RemoteAPIEmbeddingProvider
+    from rag_mcp.providers.remote_api_reranker import RemoteAPIRerankerProvider
+
+    settings = get_settings()
+    bundle = build_provider_bundle(settings)
+
     assert bundle.embedding is not None
     assert bundle.reranker is not None
     assert bundle.llm is not None
-    # embedding local_cpu != llm remote_api (capabilities choose independently)
-    from rag_mcp.providers.local_cpu import LocalCPUEmbeddingProvider
-    from rag_mcp.agents.llm_client import LLMClient
 
-    assert isinstance(bundle.embedding, LocalCPUEmbeddingProvider)
+    # 每个能力的实际实现类型必须与其 provider_type 声明相符（各能力独立选择）。
+    embedding_by_type = {
+        "local_cpu": LocalCPUEmbeddingProvider,
+        # local_gpu 在无 CUDA 时会被启动校验直接拒绝（见 test_local_gpu_without_cuda_fails），
+        # 有 CUDA 时其实现是 LocalGPUEmbeddingProvider —— LocalCPUEmbeddingProvider 的子类，
+        # 因此该 isinstance 仍然成立。
+        "local_gpu": LocalCPUEmbeddingProvider,
+        "remote_api": RemoteAPIEmbeddingProvider,
+    }
+    reranker_by_type = {
+        "local_cpu": LocalCPUReranker,
+        "local_gpu": LocalCPUReranker,
+        "remote_api": RemoteAPIRerankerProvider,
+    }
+    assert isinstance(bundle.embedding, embedding_by_type[settings.providers.embedding.provider_type])
+    assert isinstance(bundle.reranker, reranker_by_type[settings.providers.reranker.provider_type])
+    # llm 目前只支持 remote_api
     assert isinstance(bundle.llm, LLMClient)
+
     assert bundle.validation.valid is True
     assert set(bundle.limiters.keys()) == {"embedding", "reranker", "llm"}
 
