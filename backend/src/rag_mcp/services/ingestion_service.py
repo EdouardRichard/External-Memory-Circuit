@@ -35,7 +35,9 @@ from rag_mcp.parsers.chunk_type_vocab import validate_chunk_type
 from rag_mcp.parsers.converter import ConverterError
 from rag_mcp.parsers.registry import FormatHandlerRegistry
 from rag_mcp.parsers.text_extractor import TextExtractionError
+from rag_mcp.providers.active_model import active_embedding_model, derive_index_version
 from rag_mcp.providers.base import EmbeddingProvider
+from rag_mcp.providers.dimensions import resolve_collection_dimension
 from rag_mcp.utils.snowflake import generate_id
 
 logger = logging.getLogger(__name__)
@@ -56,8 +58,7 @@ def _derive_index_version(embedding_model: str) -> str:
     path component of the HuggingFace model ID with slashes replaced by
     hyphens (e.g. ``BAAI/bge-m3`` → ``bge-m3_v1``).
     """
-    short_name = embedding_model.rsplit("/", 1)[-1]
-    return f"{short_name}_v1"
+    return derive_index_version(embedding_model)
 
 
 def _validate_collection_dimension(embedding_provider, existing_dimension: int | None) -> None:
@@ -395,7 +396,7 @@ class IngestionService:
             stage_start = datetime.now(timezone.utc)
             texts = [c["content_text"] for c in chunk_dicts]
             embeddings = await self._embedding_provider.embed_texts(texts)
-            embedding_model = self._settings.embedding_model
+            embedding_model = active_embedding_model(self._settings)
             stages.append({
                 "stage": "embedding",
                 "status": "completed",
@@ -428,7 +429,6 @@ class IngestionService:
             collection_name = f"chunks_hybrid_{index_version}"
 
             # 9. Ensure Qdrant hybrid collection exists (Dense + Sparse named vectors)
-            dimension = self._embedding_provider.get_dimension()
             if self._qdrant_store.collection_exists(collection_name):
                 # FR-011/FR-013 (constitution VIII): refuse to mix a
                 # different-dimension embedding into an existing index version.
@@ -437,6 +437,9 @@ class IngestionService:
                     self._qdrant_store.get_collection_dimension(collection_name),
                 )
             else:
+                dimension = await resolve_collection_dimension(
+                    collection_name, self._embedding_provider, self._qdrant_store
+                )
                 logger.info("Creating Qdrant hybrid collection: %s (dim=%d)", collection_name, dimension)
                 self._qdrant_store.create_hybrid_collection(collection_name, dimension)
 
