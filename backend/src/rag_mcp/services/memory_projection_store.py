@@ -18,6 +18,8 @@ from rag_mcp.models.memory_projection_meta import MemoryProjectionMeta
 from rag_mcp.models.memory_salience import MemorySalience
 from rag_mcp.models.memory_views import MemoryLink, MemorySummaryNode
 from rag_mcp.models.scope_binding import ScopeBinding
+from rag_mcp.providers.active_model import active_embedding_model, derive_memory_collection
+from rag_mcp.providers.dimensions import resolve_collection_dimension
 from rag_mcp.services.memory_reducer import GOVERNANCE_AXES, projection_fingerprint, require_reducer_state
 
 VIEW_KEYS = {"relation": "entries", "dense": "dense", "links": "links",
@@ -122,10 +124,10 @@ class MemoryProjectionStore:
 
     async def _materialize_dense(self, state, scope_id, event_id):
         await self._authorize(state, scope_id, event_id)
-        model = get_settings().embedding_model.replace("/", "_").replace("-", "_")
-        collection = f"memories_dense_{model}_012_v2"
-        if not await asyncio.to_thread(self.qdrant.collection_exists, collection):
-            await asyncio.to_thread(self.qdrant.create_collection, collection, self.embedding.get_dimension())
+        collection = derive_memory_collection(active_embedding_model())
+        if not self.qdrant.collection_exists(collection):
+            dimension = await resolve_collection_dimension(collection, self.embedding, self.qdrant)
+            self.qdrant.create_collection(collection, dimension)
         rows = list(state["dense"].values())
         if rows:
             vectors = await self.embedding.embed_texts([row["content_text"] for row in rows])
