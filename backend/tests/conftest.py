@@ -123,6 +123,16 @@ async def global_database_runtime_lifetime():
     await dispose_engine()
 
 
+@pytest.fixture(autouse=True)
+def _reset_provider_bundle_between_tests():
+    """Review Focus #5：缓存不得在用例间泄漏。"""
+    from rag_mcp.providers.factory import reset_provider_bundle
+
+    reset_provider_bundle()
+    yield
+    reset_provider_bundle()
+
+
 @pytest_asyncio.fixture
 async def engine():
     """Create async engine connected to database."""

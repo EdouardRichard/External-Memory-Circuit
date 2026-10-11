@@ -14,9 +14,11 @@ referenced by environment variable NAME (constitution V).
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from rag_mcp.config import get_settings
 from rag_mcp.config.provider_config import (
     ProviderConfig,
     ProviderSettings,
@@ -216,6 +218,30 @@ def assemble_or_fail(settings) -> ProviderBundle:
         messages = "; ".join(e.message for e in bundle.validation.errors)
         raise ValueError(f"invalid provider configuration: {messages}")
     return bundle
+
+
+_bundle_cache: ProviderBundle | None = None
+# Construction is fully synchronous (no awaiting, no network I/O), so a
+# threading.Lock is correct here — it is never held across an await. The second
+# check inside the lock stops two concurrent first-callers from each building a
+# bundle (the loser's limiters would be orphaned, defeating FR-009).
+_bundle_lock = threading.Lock()
+
+
+def get_provider_bundle(settings=None) -> ProviderBundle:
+    """进程内唯一的 Provider 组合；含唯一一组 per-capability limiter。"""
+    global _bundle_cache
+    if _bundle_cache is None:
+        with _bundle_lock:
+            if _bundle_cache is None:
+                _bundle_cache = assemble_or_fail(settings or get_settings())
+    return _bundle_cache
+
+
+def reset_provider_bundle() -> None:
+    """清空缓存（测试挂钩）。"""
+    global _bundle_cache
+    _bundle_cache = None
 
 
 def check_embedding_dimension(
