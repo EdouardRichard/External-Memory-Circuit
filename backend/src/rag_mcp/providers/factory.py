@@ -23,7 +23,11 @@ from rag_mcp.config.provider_config import (
     ProviderConfig,
     ProviderSettings,
 )
-from rag_mcp.providers.concurrency import ConcurrencyLimiter, build_limiters
+from rag_mcp.providers.concurrency import (
+    ConcurrencyLimiter,
+    SyncConcurrencyLimiter,
+    build_limiters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,7 @@ class ProviderBundle:
     reranker: Any
     llm: Any
     validation: ValidationResult
-    limiters: dict[str, ConcurrencyLimiter]
+    limiters: dict[str, ConcurrencyLimiter | SyncConcurrencyLimiter]
 
 
 def _resolve_endpoint(cfg: ProviderConfig, capability: str, llm_base_url: str) -> str | None:
@@ -169,7 +173,11 @@ def _build_reranker(cfg: ProviderConfig, limiter: ConcurrencyLimiter | None = No
     raise ValueError(f"unsupported reranker provider_type {cfg.provider_type!r}")
 
 
-def _build_llm(cfg: ProviderConfig, settings):
+def _build_llm(
+    cfg: ProviderConfig,
+    settings,
+    limiter: SyncConcurrencyLimiter | None = None,
+):
     import os
 
     if cfg.provider_type == "remote_api":
@@ -181,6 +189,9 @@ def _build_llm(cfg: ProviderConfig, settings):
             base_url=endpoint or "",
             api_key=api_key,
             model=cfg.model or settings.llm_model,
+            # FR-009/§3.5: the LLM ceiling must reach the synchronous client,
+            # otherwise LLM_CONCURRENCY_LIMIT is inert.
+            limiter=limiter,
         )
     raise ValueError(f"unsupported llm provider_type {cfg.provider_type!r}")
 
@@ -194,7 +205,7 @@ def build_provider_bundle(settings) -> ProviderBundle:
     limiters = build_limiters(providers)
     embedding = _build_embedding(providers.embedding, limiter=limiters["embedding"])
     reranker = _build_reranker(providers.reranker, limiter=limiters["reranker"])
-    llm = _build_llm(providers.llm, settings)
+    llm = _build_llm(providers.llm, settings, limiter=limiters["llm"])
     validation = validate_provider_config(
         providers,
         llm_base_url=settings.llm_base_url,

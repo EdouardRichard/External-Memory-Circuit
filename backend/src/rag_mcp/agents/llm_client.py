@@ -29,6 +29,7 @@ import json
 import logging
 import math
 import re
+from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -45,6 +46,7 @@ from rag_mcp.agents.consolidation_replay import (
 from rag_mcp.agents.consolidation_replay import (
     cache_key as _replay_cache_key,
 )
+from rag_mcp.providers.concurrency import SyncConcurrencyLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +179,7 @@ class LLMClient:
         model: str,
         timeout_s: float = 5.0,
         cache_dir: str | None = None,
+        limiter: SyncConcurrencyLimiter | None = None,
     ) -> None:
         self._base_url = (base_url or "").rstrip("/")
         self._api_key = api_key or ""
@@ -184,6 +187,10 @@ class LLMClient:
         self._timeout_s = timeout_s if timeout_s > 0 else 5.0
         # Response cache (T070, SC-008): empty/None disables caching.
         self._cache_dir = cache_dir or None
+        # FR-009/§3.5: bound the number of in-flight HTTP calls. None keeps the
+        # pre-existing unbounded behaviour for callers that construct a client
+        # directly (tests, the capability router).
+        self._limiter = limiter
         # Usage accounting for run-cost recording (T063, SC-007).
         # "calls" counts REAL HTTP calls only; cache hits are tracked
         # separately so recorded cost always reflects real usage.
@@ -283,7 +290,8 @@ class LLMClient:
                 self.calls += 1
                 self.prompt_chars += receipt.prompt_chars
                 _emit_receipt(receipt)
-                response = http.post(self._base_url + '/chat/completions', json=body, headers=headers)
+                with self._limiter if self._limiter is not None else nullcontext():
+                    response = http.post(self._base_url + '/chat/completions', json=body, headers=headers)
             if response.status_code != 200:
                 receipt = replace(receipt, reason=f'PROVIDER_HTTP_{response.status_code}')
             else:
@@ -434,7 +442,8 @@ class LLMClient:
         url = self._base_url + "/chat/completions"
         try:
             with httpx.Client(timeout=self._timeout_s) as http:
-                resp = http.post(url, json=body, headers=headers)
+                with self._limiter if self._limiter is not None else nullcontext():
+                    resp = http.post(url, json=body, headers=headers)
             if resp.status_code != 200:
                 logger.warning(
                     "LLMClient: HTTP %s from %s", resp.status_code, url,

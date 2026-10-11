@@ -254,10 +254,27 @@ async def test_pipeline_never_creates_zero_dimension_collection(monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_existing_collection_never_probes_provider(monkeypatch) -> None:
-    """已存在的集合即使读不到维度也不得触发 provider 探测（Controller ruling）."""
+    """已存在的集合不得触发维度解析，更不得探测 provider（Controller ruling）.
+
+    只断言 ``provider.probes == 0`` 不够：它藏在 ``if collection_exists`` 的
+    else 分支之外，现行实现根本走不到那里；一旦将来把
+    ``resolve_collection_dimension`` 改成无条件调用，而集合维度又能读出来，
+    探测计数仍是 0，用例依旧全绿。因此直接在调用点钉住契约：
+    ``ingestion_service.resolve_collection_dimension`` 不得被调用。
+    """
     provider = _ResolvableProvider(dim=1024)
     store = _RecordingStore(exists=True, existing_dim=None)
     service = _build_service(monkeypatch, provider, store)
+
+    from rag_mcp.services import ingestion_service as mod
+
+    resolution_calls: list[tuple] = []
+
+    async def _forbidden_resolution(*args, **kwargs):
+        resolution_calls.append(args)
+        raise AssertionError("provider must not be probed for an existing collection")
+
+    monkeypatch.setattr(mod, "resolve_collection_dimension", _forbidden_resolution)
 
     async def _stop(scope_id):
         raise _StopPipeline
@@ -267,5 +284,6 @@ async def test_existing_collection_never_probes_provider(monkeypatch) -> None:
     with pytest.raises(_StopPipeline):
         await service.ingest(7)
 
+    assert resolution_calls == []
     assert provider.probes == 0
     assert store.created == []

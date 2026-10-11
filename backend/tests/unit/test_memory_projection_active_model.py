@@ -6,10 +6,16 @@ active provider model via ``derive_memory_collection`` and resolve the
 dimension through the shared ``resolve_collection_dimension`` helper. The old
 ``self.embedding.get_dimension()`` path returns 0 for a remote provider and
 would create a zero-dimension collection.
+
+本文件刻意使用一份**遗留字段与 Provider 字段不同**的 settings：本仓库 ``.env``
+把 ``EMBEDDING_MODEL=BAAI/bge-m3`` 同时喂给 ``Settings.embedding_model`` 与
+``providers.embedding.model``，两者一致时任何断言都无法判断取值来源，回退到旧实现
+也照样通过（本文件存在的唯一理由就是拦住这次回退）。
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -67,8 +73,45 @@ def _store(qdrant: _FakeQdrant, embedding: _FakeEmbedding) -> MemoryProjectionSt
     return store
 
 
+def _divergent_settings() -> SimpleNamespace:
+    """Settings whose legacy field deliberately disagrees with the active Provider.
+
+    ``embedding_model`` is what the projection must STOP using; only
+    ``providers.embedding`` is a legal naming source. ``data_root`` is present
+    because the store constructor legitimately reads it.
+    """
+    return SimpleNamespace(
+        embedding_model="legacy/local-model",  # must never name the collection
+        data_root="./data/uploads",
+        providers=SimpleNamespace(embedding=SimpleNamespace(model="BAAI/bge-m3")),
+    )
+
+
+def _patch_settings(monkeypatch, settings: SimpleNamespace) -> None:
+    """Point both naming paths at the divergent settings.
+
+    ``memory_projection_store`` is patched as well: a reversion to
+    ``get_settings().embedding_model`` inside the store then resolves the LEGACY
+    value and fails the collection-name assertions, which is the regression this
+    file exists to catch.
+    """
+    from rag_mcp.providers import active_model as active_model_mod
+    from rag_mcp.services import memory_projection_store as store_mod
+
+    monkeypatch.setattr(active_model_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(store_mod, "get_settings", lambda: settings)
+
+
 def test_memory_collection_name_uses_active_model(monkeypatch) -> None:
-    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    """集合名取自 ``providers.embedding.model``，绝不读遗留 ``settings.embedding_model``."""
+    settings = _divergent_settings()
+    # 哨兵：遗留字段与 Provider 字段必须派生出不同的名字，否则本用例仍然区分不出取值来源。
+    assert derive_memory_collection(settings.embedding_model) != derive_memory_collection(
+        active_embedding_model(settings)
+    )
+    _patch_settings(monkeypatch, settings)
+
+    assert active_embedding_model() == "BAAI/bge-m3"
     assert derive_memory_collection(active_embedding_model()) == "memories_dense_BAAI_bge_m3_012_v2"
 
 
@@ -88,15 +131,17 @@ async def test_materialize_dense_does_not_create_zero_dim_collection(monkeypatch
 @pytest.mark.asyncio
 async def test_materialize_dense_creates_collection_from_active_model_and_resolved_dimension(monkeypatch) -> None:
     """回到旧实现（``get_settings().embedding_model`` + ``get_dimension()``）时本用例必须失败."""
-    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    _patch_settings(monkeypatch, _divergent_settings())
     qdrant = _FakeQdrant(exists=False)
     embedding = _FakeEmbedding(resolved=1024, dimension=0)
 
     collection = await _store(qdrant, embedding)._materialize_dense({"dense": {}}, uuid4(), 7)
 
-    assert collection == derive_memory_collection(active_embedding_model())
+    # 独立字面量：期望值直接写死（不借助生产 helper 反算），旧实现会得到
+    # ``memories_dense_legacy_local_model_012_v2``（遗留字段）而不是这个现网集合名。
     assert collection == "memories_dense_BAAI_bge_m3_012_v2"
-    assert qdrant.created == [(collection, 1024)]
+    assert qdrant.created == [("memories_dense_BAAI_bge_m3_012_v2", 1024)]
+    assert embedding.resolve_calls == 1
 
 
 @pytest.mark.asyncio
