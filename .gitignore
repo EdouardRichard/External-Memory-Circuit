@@ -43,6 +43,9 @@ eval/runs/
 # (multi-GB pnpm tree, reinstallable; must never enter version control)
 eval/.dsh-*/
 .superpowers/
+# 流程类文档（brainstorm/设计方案/实施计划/评审记录）：只留在本地，不进入远端。
+# 与 .superpowers/ 同理——它们描述的是「怎么做的过程」，不是交付物本身。
+docs/superpowers/
 # Agentic eval LLM response cache (record-replay fixture, T070)
 eval/.agentic_llm_cache/
 docs/1.0-iteration-roadmap.md
