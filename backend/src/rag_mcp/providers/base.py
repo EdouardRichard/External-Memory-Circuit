@@ -43,6 +43,16 @@ class EmbeddingProvider(ABC):
         """
         ...
 
+    async def resolve_dimension(self) -> int:
+        """Return a dimension usable for creating a collection.
+
+        A return value > 0 means the dimension is determined (declared in
+        configuration, previously probed, or introspected from the loaded
+        model). A return value of 0 means it is UNKNOWN: callers MUST NOT
+        pass 0 to collection creation and must fail explicitly instead.
+        """
+        return self.get_dimension()
+
 
 class RerankerProvider(ABC):
     """Abstract interface for reranking providers. Stub for 002."""

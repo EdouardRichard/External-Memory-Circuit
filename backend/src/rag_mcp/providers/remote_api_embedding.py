@@ -88,3 +88,17 @@ class RemoteAPIEmbeddingProvider(EmbeddingProvider):
         if self._dimension is None:
             return 0
         return self._dimension
+
+    async def resolve_dimension(self) -> int:
+        """Return the collection dimension, probing the endpoint once if unknown.
+
+        A dimension declared in configuration (or already learned from an
+        earlier call) is returned directly. Otherwise a single probe request
+        determines it. Reuses ``embed_texts`` so the existing degradation path
+        applies: any failure returns 0 with ``last_error`` set, and callers
+        must not build a collection with 0.
+        """
+        if self._dimension:
+            return self._dimension
+        await self.embed_texts(["dimension probe"])  # 复用既有降级路径，失败返回 []
+        return self._dimension or 0
