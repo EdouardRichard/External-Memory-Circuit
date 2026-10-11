@@ -147,3 +147,17 @@ def _cuda_available() -> bool:
         return bool(torch.cuda.is_available())
     except Exception:
         return False
+
+
+def test_build_embedding_forwards_declared_dimension() -> None:
+    """factory 必须把声明维度传给远程 embedding provider（否则 EMBEDDING_DIMENSION 空转）."""
+    from rag_mcp.providers import factory
+
+    cfg = _cfg(
+        provider_type="remote_api",
+        endpoint="https://e.test/v1",
+        dimension=1024,
+    )
+    provider = factory._build_embedding(cfg)
+    assert provider.get_dimension() == 1024
+    assert provider._dimension == 1024

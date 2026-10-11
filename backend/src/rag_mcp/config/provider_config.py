@@ -24,6 +24,7 @@ cross-field startup validation lives in providers/factory.py (T038).
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Mapping
@@ -181,8 +182,13 @@ def load_provider_config(capability: str, env: Mapping[str, str] | None = None) 
             raise ValueError(
                 f"{prefix}_TIMEOUT_S must be positive, got {raw_timeout!r}"
             ) from exc
-        if timeout_s <= 0:
-            raise ValueError(f"{prefix}_TIMEOUT_S must be positive, got {raw_timeout!r}")
+        # nan/inf parse successfully and are not <= 0, but they violate the
+        # contract schema (exclusiveMinimum: 0) and serialize as non-standard
+        # JSON, so reject them here instead of downstream.
+        if not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError(
+                f"{prefix}_TIMEOUT_S must be a finite positive number, got {raw_timeout!r}"
+            )
 
     return ProviderConfig(
         capability=capability,

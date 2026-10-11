@@ -142,8 +142,9 @@ def _build_embedding(cfg: ProviderConfig, limiter: ConcurrencyLimiter | None = N
         return RemoteAPIEmbeddingProvider(
             endpoint=cfg.endpoint or "",
             model=cfg.model,
-            api_key_env=cfg.api_key_env,
+            dimension=cfg.dimension,
             timeout_s=cfg.timeout_s,
+            api_key_env=cfg.api_key_env,
             limiter=limiter,
         )
     raise ValueError(f"unsupported embedding provider_type {cfg.provider_type!r}")
