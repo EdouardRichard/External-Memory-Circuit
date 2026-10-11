@@ -27,14 +27,18 @@ class RemoteAPIRerankerProvider(RerankerProvider):
         endpoint: str,
         model: str,
         api_key_env: str | None = None,
-        timeout_s: float = 2.0,
+        timeout_s: float | None = 2.0,
         transport: Any = None,
+        limiter: Any = None,
     ) -> None:
         self._endpoint = (endpoint or "").rstrip("/")
         self._model = model
         self._api_key_env = api_key_env
-        self._timeout_s = timeout_s if timeout_s > 0 else 2.0
+        # None means "not supplied" (env var unset) -> constructor default.
+        self._timeout_s = timeout_s if timeout_s is not None and timeout_s > 0 else 2.0
         self._transport = transport
+        # FR-009: per-capability concurrency ceiling; None means no limiting.
+        self._limiter = limiter
         self.last_error: str | None = None
         self.calls = 0
 
@@ -42,6 +46,24 @@ class RemoteAPIRerankerProvider(RerankerProvider):
         if not self._api_key_env:
             return ""
         return os.getenv(self._api_key_env, "")
+
+    async def _post_rerank(self, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Perform the /rerank HTTP call and return the parsed JSON body."""
+        async with httpx.AsyncClient(
+            transport=self._transport, timeout=self._timeout_s
+        ) as client:
+            response = await client.post(
+                f"{self._endpoint}/rerank", json=payload, headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def _call_with_limiter(self, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Enter the FR-009 limiter around the HTTP call only (None = unbounded)."""
+        if self._limiter is None:
+            return await self._post_rerank(payload, headers)
+        async with self._limiter:
+            return await self._post_rerank(payload, headers)
 
     def _normalize(self, score: float) -> float:
         """Clamp a relevance score into [0, 1] (FR-015 score normalization)."""
@@ -69,14 +91,7 @@ class RemoteAPIRerankerProvider(RerankerProvider):
             "top_n": max(1, top_k),
         }
         try:
-            async with httpx.AsyncClient(
-                transport=self._transport, timeout=self._timeout_s
-            ) as client:
-                response = await client.post(
-                    f"{self._endpoint}/rerank", json=payload, headers=headers
-                )
-                response.raise_for_status()
-                body = response.json()
+            body = await self._call_with_limiter(payload, headers)
             results = body.get("results", [])
             scored: dict[int, float] = {
                 int(r["index"]): self._normalize(r.get("relevance_score"))

@@ -125,7 +125,7 @@ def validate_provider_config(
     return ValidationResult(valid=not errors, errors=errors)
 
 
-def _build_embedding(cfg: ProviderConfig):
+def _build_embedding(cfg: ProviderConfig, limiter: ConcurrencyLimiter | None = None):
     if cfg.provider_type == "local_cpu":
         from rag_mcp.providers.local_cpu import LocalCPUEmbeddingProvider
 
@@ -141,14 +141,17 @@ def _build_embedding(cfg: ProviderConfig):
             endpoint=cfg.endpoint or "",
             model=cfg.model,
             api_key_env=cfg.api_key_env,
+            timeout_s=cfg.timeout_s,
+            limiter=limiter,
         )
     raise ValueError(f"unsupported embedding provider_type {cfg.provider_type!r}")
 
 
-def _build_reranker(cfg: ProviderConfig):
+def _build_reranker(cfg: ProviderConfig, limiter: ConcurrencyLimiter | None = None):
     if cfg.provider_type in ("local_cpu", "local_gpu"):
         from rag_mcp.providers.local_cpu_reranker import LocalCPUReranker
 
+        # Local providers queue on CPU/GPU; FR-009 limiting is remote-only here.
         return LocalCPUReranker(model_name=cfg.model)
     if cfg.provider_type == "remote_api":
         from rag_mcp.providers.remote_api_reranker import RemoteAPIRerankerProvider
@@ -157,6 +160,8 @@ def _build_reranker(cfg: ProviderConfig):
             endpoint=cfg.endpoint or "",
             model=cfg.model,
             api_key_env=cfg.api_key_env,
+            timeout_s=cfg.timeout_s,
+            limiter=limiter,
         )
     raise ValueError(f"unsupported reranker provider_type {cfg.provider_type!r}")
 
@@ -180,10 +185,13 @@ def _build_llm(cfg: ProviderConfig, settings):
 def build_provider_bundle(settings) -> ProviderBundle:
     """Assemble the runtime providers and validate the configuration."""
     providers = settings.providers
-    embedding = _build_embedding(providers.embedding)
-    reranker = _build_reranker(providers.reranker)
-    llm = _build_llm(providers.llm, settings)
+    # Build each capability's limiter once, then hand the same objects to the
+    # providers that enforce them (FR-009) — bundle.limiters stays the single
+    # authoritative set.
     limiters = build_limiters(providers)
+    embedding = _build_embedding(providers.embedding, limiter=limiters["embedding"])
+    reranker = _build_reranker(providers.reranker, limiter=limiters["reranker"])
+    llm = _build_llm(providers.llm, settings)
     validation = validate_provider_config(
         providers,
         llm_base_url=settings.llm_base_url,
