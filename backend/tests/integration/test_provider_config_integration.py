@@ -56,7 +56,11 @@ def test_bundle_embedding_provider_is_functional():
 
 @pytest.mark.asyncio
 async def test_invalid_configs_fail_explicitly_no_silent_fallback():
-    """SC-004: >=3 illegal configs -> explicit failure, silent fallback = 0."""
+    """SC-004: 非法配置 -> 显式失败，静默回退 = 0。
+
+    维度不匹配的用例已拆分为独立的 test_dimension_mismatch_fails_explicitly：
+    它需要显式传入维度参数，否则会因为 LLM endpoint 缺失而"因错误的原因通过"。
+    """
     from rag_mcp.providers.factory import validate_provider_config
 
     settings = get_settings()

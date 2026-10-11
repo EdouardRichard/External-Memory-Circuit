@@ -27,7 +27,10 @@ def _violations() -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and node.id in _SUSPECT:
-                # 仅 Name 引用（实例化/导入）算违规
+                # 只有裸 Name（即实际调用 LocalCPUEmbeddingProvider(...)）会被抓到。
+                # 注意：`from ... import LocalCPUEmbeddingProvider` 产生的是 ast.alias 而非
+                # ast.Name，因此单靠残留的 import 不会触发本测试——本测试保证的是
+                # "不再实例化"，不是"不再导入"。
                 found.append(f"{rel}:{node.lineno}:{node.id}")
     return found
 
@@ -37,7 +40,7 @@ def test_no_local_provider_instantiation_in_production_code() -> None:
     assert violations == [], f"生产代码仍引用本地 Provider: {violations}"
 
 
-def test_recall_config_hash_uses_active_model(monkeypatch) -> None:
+def test_recall_config_hash_uses_active_model() -> None:
     """RAG 门闸指纹必须取生效模型，而不是 settings.embedding_model（Review Focus #1）."""
     from types import SimpleNamespace
 
