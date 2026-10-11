@@ -30,7 +30,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
-from rag_mcp.api import memory as memory_api
 from rag_mcp.db import get_session
 from rag_mcp.models.domain_profile import DomainProfile
 from rag_mcp.models.knowledge_scope import KnowledgeScope
@@ -105,6 +104,20 @@ def _management_service(session):
     return MemoryService(session, embedding_provider=_DeterministicEmbedding())
 
 
+def _inject_embedding(monkeypatch, provider):
+    """Inject the deterministic fixture through the provider bundle seam.
+
+    Task 9 removed the ``rag_mcp.api.memory._embedding_provider`` module global, so
+    the REST ``_service`` now resolves its provider from ``get_provider_bundle()``;
+    patch that seam instead of the deleted global.
+    """
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("rag_mcp.providers.factory.get_provider_bundle",
+                        lambda settings=None: SimpleNamespace(embedding=provider))
+    return provider
+
+
 async def _scope_event_count(session, scope_id):
     return await session.scalar(select(func.count()).select_from(MemoryEvent)
                                 .where(MemoryEvent.knowledge_scope_id == scope_id))
@@ -155,7 +168,7 @@ async def _custom_domain(session, prefix):
 
 @pytest.mark.asyncio
 async def test_retire_purge_rollback_and_policy_pointers_dereference(db_session, engine, monkeypatch):
-    monkeypatch.setattr(memory_api, "_embedding_provider", _DeterministicEmbedding())
+    _inject_embedding(monkeypatch, _DeterministicEmbedding())
     sid, payload, key = await _custom_domain(db_session, "t083-policy")
     first = await _management_service(db_session).record(payload)
     app = create_app()
@@ -207,7 +220,7 @@ async def test_retire_purge_rollback_and_policy_pointers_dereference(db_session,
 
 @pytest.mark.asyncio
 async def test_refused_commands_and_quota_refusals_leave_no_authority_row(db_session, engine, monkeypatch):
-    monkeypatch.setattr(memory_api, "_embedding_provider", _DeterministicEmbedding())
+    _inject_embedding(monkeypatch, _DeterministicEmbedding())
     sid, payload = await scope_and_payload(db_session)
     service = _management_service(db_session)
     first = await service.record(payload)
@@ -332,7 +345,7 @@ async def _committed_candidate(session, owner):
 
 @pytest.mark.asyncio
 async def test_promotion_pointer_is_returned_and_dereferenceable(db_session, engine, monkeypatch):
-    monkeypatch.setattr(memory_api, "_embedding_provider", _DeterministicEmbedding())
+    _inject_embedding(monkeypatch, _DeterministicEmbedding())
     app = create_app()
     async with _writer(engine) as owner:
         app.state.writer_lease = owner
@@ -383,7 +396,7 @@ async def test_audit_read_path_is_writer_only_and_absent_from_the_mcp_surface(db
     from rag_mcp.mcp.memory_tools import tool_names
 
     provider = _DeterministicEmbedding()
-    monkeypatch.setattr(memory_api, "_embedding_provider", provider)
+    _inject_embedding(monkeypatch, provider)
 
     app = create_app()
     paths = set(app.openapi()["paths"])
