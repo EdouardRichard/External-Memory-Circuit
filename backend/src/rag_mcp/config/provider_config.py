@@ -12,6 +12,10 @@ from environment variables following the 001 frozen-Settings pattern
 - `{PREFIX}_CONCURRENCY_LIMIT` (+ `_MAX` ceiling) — per-capability limit,
   clamped to the hard ceiling (clarification Q2: LLM 4/8, Embedding 8/16,
   Reranker 2/4; schema ceiling 64).
+- `{PREFIX}_DIMENSION` — optional declared output vector dimension for
+  embedding/reranker; unset (or blank) lets the Provider resolve it.
+- `{PREFIX}_TIMEOUT_S` — optional per-call timeout in seconds; unset (or
+  blank) uses the Provider constructor default.
 
 Default combination (quickstart): local CPU embedding + reranker, remote LLM.
 Illegal values (unknown provider_type, non-integer limits) fail loudly here;
@@ -53,6 +57,10 @@ _DEFAULT_PROVIDER_TYPES: dict[str, str] = {
     "llm": "remote_api",
 }
 
+# 可选解析项：None 表示未设置（由 Provider 自身默认值或运行时探测决定）
+_DEFAULT_DIMENSION: dict[str, int | None] = {"embedding": None, "reranker": None, "llm": None}
+_DEFAULT_TIMEOUT_S: dict[str, float | None] = {"embedding": None, "reranker": None, "llm": None}
+
 # Provider-level concurrency ceiling shared with the 006 contract schema
 # (common.schema.json ConcurrencyLimit maximum).
 SCHEMA_CONCURRENCY_CEILING = 64
@@ -82,6 +90,8 @@ class ProviderConfig:
     api_key_env: str | None
     concurrency_limit: int
     concurrency_limit_max: int
+    dimension: int | None = None
+    timeout_s: float | None = None
 
     def to_contract_dict(self) -> dict:
         """Serialize in provider-config.schema.json ProviderCapabilityConfig form."""
@@ -91,15 +101,17 @@ class ProviderConfig:
             "endpoint": self.endpoint,
             "api_key_env": self.api_key_env,
             "concurrency_limit": self.concurrency_limit,
+            "dimension": self.dimension,
+            "timeout_s": self.timeout_s,
         }
 
 
 def load_provider_config(capability: str, env: Mapping[str, str] | None = None) -> ProviderConfig:
     """Load one capability's ProviderConfig from environment variables.
 
-    Raises ValueError on an unknown capability or provider_type, or a
-    non-integer concurrency value (fail loudly, never silently fall back —
-    SC-004).
+    Raises ValueError on an unknown capability or provider_type, a
+    non-integer concurrency value, or a non-positive dimension/timeout
+    (fail loudly, never silently fall back — SC-004).
     """
     if capability not in VALID_CAPABILITIES:
         raise ValueError(f"unknown provider capability: {capability!r}")
@@ -145,6 +157,33 @@ def load_provider_config(capability: str, env: Mapping[str, str] | None = None) 
     # Clamp the effective limit into [1, ceiling] (FR-009 bounded guardrail).
     limit = _clamp(limit, 1, ceiling)
 
+    # Optional declarations: blank or missing means "unset" (None).
+    raw_dimension = lookup(f"{prefix}_DIMENSION")
+    dimension = _DEFAULT_DIMENSION[capability]
+    if raw_dimension is not None and raw_dimension.strip():
+        try:
+            dimension = int(raw_dimension)
+        except ValueError as exc:
+            raise ValueError(
+                f"{prefix}_DIMENSION must be a positive integer, got {raw_dimension!r}"
+            ) from exc
+        if dimension < 1:
+            raise ValueError(
+                f"{prefix}_DIMENSION must be a positive integer, got {raw_dimension!r}"
+            )
+
+    raw_timeout = lookup(f"{prefix}_TIMEOUT_S")
+    timeout_s = _DEFAULT_TIMEOUT_S[capability]
+    if raw_timeout is not None and raw_timeout.strip():
+        try:
+            timeout_s = float(raw_timeout)
+        except ValueError as exc:
+            raise ValueError(
+                f"{prefix}_TIMEOUT_S must be positive, got {raw_timeout!r}"
+            ) from exc
+        if timeout_s <= 0:
+            raise ValueError(f"{prefix}_TIMEOUT_S must be positive, got {raw_timeout!r}")
+
     return ProviderConfig(
         capability=capability,
         provider_type=provider_type,
@@ -153,6 +192,8 @@ def load_provider_config(capability: str, env: Mapping[str, str] | None = None) 
         api_key_env=api_key_env,
         concurrency_limit=limit,
         concurrency_limit_max=ceiling,
+        dimension=dimension,
+        timeout_s=timeout_s,
     )
 
 

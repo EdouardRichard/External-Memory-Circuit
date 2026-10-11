@@ -48,7 +48,9 @@
         "model": { "type": "string", "minLength": 1, "description": "模型标识（如 BAAI/bge-m3、BAAI/bge-reranker-v2-m3、deepseek-v4-flash）" },
         "endpoint": { "type": ["null", "string"], "format": "uri", "description": "remote_api 必填（OpenAI-compatible 基址）；local_cpu/local_gpu 为 null" },
         "api_key_env": { "type": ["null", "string"], "$comment": "SecretEnvName 模式", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "凭据承载环境变量名（仅名称；local 类型为 null）" },
-        "concurrency_limit": { "$ref": "common.schema.json#/definitions/ConcurrencyLimit" }
+        "concurrency_limit": { "$ref": "common.schema.json#/definitions/ConcurrencyLimit" },
+        "dimension": { "type": ["null", "integer"], "minimum": 1, "description": "声明的输出向量维度（可选）；null 表示未声明，由既有集合维度或首次调用结果确定" },
+        "timeout_s": { "type": ["null", "number"], "exclusiveMinimum": 0, "description": "单次 Provider 调用的超时秒数（可选）；null 表示使用 Provider 构造默认值" }
       },
       "required": ["provider_type", "model", "endpoint", "api_key_env", "concurrency_limit"],
       "additionalProperties": false
